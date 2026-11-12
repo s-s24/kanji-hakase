@@ -1,0 +1,5 @@
+# 元データ(ダウンロード物)
+raw/
+node_modules/
+.DS_Store
+Thumbs.db

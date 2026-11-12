@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#b33a2b">
+<title>漢字辞典</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="漢字辞典">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="search">
+    <input id="q" type="search" placeholder="読み・漢字・画数で検索" autocomplete="off" enterkeyhint="search">
+    <button id="clear" class="icon-btn" aria-label="消す" hidden>×</button>
+  </div>
+  <nav class="modes">
+    <button id="btn-hw" class="mode" aria-pressed="false">✍ 手書き</button>
+    <button id="btn-rad" class="mode" aria-pressed="false">部首</button>
+  </nav>
+</header>
+
+<section id="hw" class="panel" hidden>
+  <div class="hw-wrap">
+    <canvas id="pad" aria-label="手書き入力欄"></canvas>
+    <div class="hw-tools">
+      <button id="hw-undo">戻す</button>
+      <button id="hw-clear">消す</button>
+    </div>
+  </div>
+  <div id="hw-cands" class="cands"><span class="muted">枠に漢字を書いてください（書き順どおりだと精度が上がります）</span></div>
+</section>
+
+<section id="rad" class="panel" hidden></section>
+
+<main id="results"></main>
+
+<div id="detail" class="detail" hidden>
+  <header class="detail-bar">
+    <button id="back" class="icon-btn" aria-label="戻る">‹</button>
+    <div class="spacer"></div>
+    <button id="copy" class="icon-btn" aria-label="コピー">⧉</button>
+    <button id="fav" class="icon-btn" aria-label="お気に入り">☆</button>
+  </header>
+  <div id="detail-body" class="detail-body"></div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>
