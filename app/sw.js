@@ -1,5 +1,5 @@
 // オフライン対応: 本体とデータは最初に保存、筆順データは見た分だけ保存
-const VERSION = 'kanji-v1';
+const VERSION = 'kanji-v2';
 const CORE = ['./', 'index.html', 'style.css', 'app.js', 'manifest.json', 'icon.svg', 'icon-180.png', 'icon-512.png',
   'data/kanji.json', 'data/radicals.json', 'data/hw.json'];
 

@@ -21,6 +21,54 @@ const strokeCache = {};
 const LIMIT = 240;
 let view = 'home'; // 'home' | 'results'
 
+// ---- 熟語データ(JMdict + ウィクショナリー)。大きいので後から読み込む ----
+let W = null;          // [{ i, forms, f, reads, fl, s }]
+let WIDX = null;       // 表記 -> 熟語
+let wordsLoading = null;
+const wdefCache = {};
+const WLIMIT = 50;
+function loadWords() {
+  if (!wordsLoading) {
+    wordsLoading = fetch('data/words.json').then((r) => r.json()).then((list) => {
+      W = list.map(([f, r, fl, s], i) => ({ i, forms: f.split('・'), f, reads: r.split('・'), fl, s }));
+      WIDX = new Map();
+      for (const w of W) for (const x of w.forms) if (!WIDX.has(x)) WIDX.set(x, w);
+      return W;
+    }).catch(() => { wordsLoading = null; return null; });
+  }
+  return wordsLoading;
+}
+async function loadDefs(i) {
+  const b = Math.floor(i / 1000);
+  if (!wdefCache[b]) {
+    try { wdefCache[b] = await fetch(`data/wdef/${b}.json`).then((r) => r.json()); } catch { return undefined; }
+  }
+  return wdefCache[b][i % 1000];
+}
+// 表記で探す: 完全一致 → 前方一致 → 部分一致(それぞれよく使う語が先)
+function wordsByText(q) {
+  if (!W) return [];
+  const exact = [], starts = [], inc = [];
+  for (const w of W) {
+    if (!w.f.includes(q)) continue;
+    if (w.forms.includes(q)) exact.push(w);
+    else if (w.forms.some((x) => x.startsWith(q))) starts.push(w);
+    else inc.push(w);
+  }
+  return exact.concat(starts, inc);
+}
+// 読みで探す: 完全一致 → 前方一致
+function wordsByReading(hira, kata) {
+  if (!W) return [];
+  const exact = [], starts = [];
+  for (const w of W) {
+    if (w.reads.some((r) => r === hira || r === kata)) exact.push(w);
+    else if (w.reads.some((r) => r.startsWith(hira) || r.startsWith(kata))) starts.push(w);
+  }
+  return exact.concat(starts);
+}
+const wordSection = (title, words) => (W ? (words.length ? { title, words } : null) : { title: '熟語', loading: true });
+
 // 部首の日本での呼び名で見かける形(表示用)
 const RAD_ALT = { 9: '亻', 18: '刂', 26: '㔾', 47: '巛', 58: '彐', 61: '忄', 64: '扌', 66: '攵', 85: '氵', 86: '灬', 87: '爫', 93: '牜', 94: '犭', 96: '王', 113: '礻', 122: '罒', 125: '耂', 130: '⺼', 140: '艹', 145: '衤', 162: '辶', 163: '阝', 170: '阝', 184: '飠' };
 
@@ -76,6 +124,10 @@ function search(raw) {
     if (kana) list = list.filter((c) => readingScore(K[c], toHira(kana), toKata(kana)) < 9);
     list.sort(byStroke);
     if (list.length) sections.push({ title: `「${kanjiChars.join('')}」を含む漢字`, list, showStroke: true });
+    // 熟語: 2字以上なら熟語を先頭に、1字なら「入力した漢字」の次に
+    const text = chars.join('');
+    const ws = wordSection(`「${text}」の熟語`, wordsByText(text));
+    if (ws) sections.splice([...text].length >= 2 ? 0 : found.length ? 1 : 0, 0, ws);
     return sections;
   }
 
@@ -91,7 +143,9 @@ function search(raw) {
     const exact = scored.filter((x) => x[1] <= 1).map((x) => x[0]);
     const prefix = scored.filter((x) => x[1] > 1).map((x) => x[0]);
     if (exact.length) sections.push({ title: `「${hira}」と読む漢字`, list: exact, reading: hira });
-    if (prefix.length) sections.push({ title: `「${hira}…」で始まる読み`, list: prefix, reading: hira });
+    const ws = wordSection(`「${hira}」と読む熟語`, wordsByReading(hira, kata));
+    if (ws) sections.push(ws);
+    if (prefix.length) sections.push({ title: `「${hira}…」で始まる読みの漢字`, list: prefix, reading: hira });
     return sections;
   }
   return [];
@@ -128,11 +182,20 @@ function renderSections(sections) {
   box.textContent = '';
   view = sections ? 'results' : 'home';
   if (!sections) return renderHome();
-  if (!sections.length || sections.every((s) => !s.list.length)) {
+  if (!sections.length || sections.every((s) => !(s.loading || (s.list || s.words).length))) {
     box.append(el('p', { class: 'empty' }, '見つかりませんでした'));
     return;
   }
   for (const s of sections) {
+    if (s.loading) {
+      box.append(el('div', { class: 'sec' }, el('span', {}, s.title)), el('p', { class: 'muted' }, '熟語データを読み込み中…'));
+      continue;
+    }
+    if (s.words) {
+      box.append(el('div', { class: 'sec' }, el('span', {}, s.title), el('span', {}, `${s.words.length}語`)));
+      box.append(wordList(s.words, WLIMIT));
+      continue;
+    }
     box.append(el('div', { class: 'sec' }, el('span', {}, s.title), el('span', {}, `${s.list.length}字`)));
     const grid = el('div', { class: 'grid' });
     const sub = (c) => s.showStroke ? `${K[c].s}画` : s.reading ? matchedReading(K[c], s.reading) : undefined;
@@ -147,6 +210,28 @@ function renderSections(sections) {
   }
 }
 
+// 熟語の一覧(limit 件ずつ「もっと見る」)
+function wordRow(w) {
+  return el('button', { class: 'wrow', onclick: () => openWord(w.i) },
+    el('span', { class: 'wf' }, w.forms[0]),
+    el('span', { class: 'wr' }, w.reads[0]),
+    el('span', { class: 'ws' }, w.s || (w.fl & 2 ? '' : '（日本語の意味データなし）')));
+}
+function wordList(words, limit, onMore) {
+  const box = el('div', { class: 'wlist' });
+  const draw = (from) => words.slice(from, from + limit).forEach((w) => box.append(wordRow(w)));
+  draw(0);
+  if (words.length <= limit) return box;
+  const wrap = el('div', {}, box);
+  let shown = limit;
+  const more = el('button', { class: 'more', onclick: () => {
+    if (onMore) return onMore();
+    draw(shown); shown += limit; if (shown >= words.length) more.remove();
+  } }, onMore ? `すべて見る（${words.length}語）` : 'もっと見る');
+  wrap.append(more);
+  return wrap;
+}
+
 // タイル下に、検索した読みに合ったものを出す
 function matchedReading(e, hira) {
   const kata = toKata(hira);
@@ -157,23 +242,27 @@ function matchedReading(e, hira) {
 
 function renderHome() {
   const box = $('#results');
-  const hist = store.get('history').filter((c) => K[c]);
-  const fav = store.get('fav').filter((c) => K[c]);
-  if (fav.length) {
-    box.append(el('div', { class: 'sec' }, el('span', {}, '★ お気に入り')));
-    const g = el('div', { class: 'grid' }); fav.forEach((c) => g.append(tile(c))); box.append(g);
-  }
-  if (hist.length) {
-    box.append(el('div', { class: 'sec' }, el('span', {}, '最近見た漢字')));
-    const g = el('div', { class: 'grid' }); hist.forEach((c) => g.append(tile(c))); box.append(g);
-  }
+  // 漢字は「海」、熟語は「w:海岸」の形で保存している
+  const split = (keys) => [keys.filter((c) => K[c]), WIDX ? keys.filter((k) => k.startsWith('w:') && WIDX.has(k.slice(2))).map((k) => WIDX.get(k.slice(2))) : []];
+  const [favK, favW] = split(store.get('fav'));
+  const [histK, histW] = split(store.get('history'));
+  const block = (title, ks, ws) => {
+    if (!ks.length && !ws.length) return;
+    box.append(el('div', { class: 'sec' }, el('span', {}, title)));
+    if (ks.length) { const g = el('div', { class: 'grid' }); ks.forEach((c) => g.append(tile(c))); box.append(g); }
+    if (ws.length) box.append(el('div', { style: ks.length ? 'margin-top:8px' : '' }, wordList(ws, 10)));
+  };
+  block('★ お気に入り', favK, favW);
+  block('最近見た漢字・熟語', histK.slice(0, 24), histW.slice(0, 10));
   const help = el('div', { class: 'help' });
   help.innerHTML = `<b>こんな探し方ができます</b><ul>
+    <li><b>熟語</b>：「海岸」「かいがん」→ 読みと意味</li>
     <li><b>読み</b>：「うみ」「カイ」</li>
     <li><b>パーツ</b>：「氵」「木口」→ その部品を含む漢字</li>
     <li><b>パーツ＋読み</b>：「木 ま」→ 木を含み「ま…」と読む字</li>
     <li><b>画数</b>：「12」「12画」</li>
-    <li><b>手書き</b>・<b>部首</b>：上のボタンから</li></ul>`;
+    <li><b>手書き</b>：書いた字が検索欄に入るので、続けて書けば熟語も探せます</li>
+    <li><b>部首</b>：上のボタンから</li></ul>`;
   box.append(el('div', { class: 'sec' }), help);
 }
 
@@ -183,19 +272,11 @@ async function openDetail(c, push = true) {
   if (!e) return;
   addHistory(c);
   if (push) history.pushState({ k: c }, '', '#k=' + encodeURIComponent(c));
-  $('#detail').hidden = false;
-  $('#detail').scrollTop = 0;
-  document.body.style.overflow = 'hidden';
-  $('#fav').textContent = isFav(c) ? '★' : '☆';
-  $('#fav').classList.toggle('on', isFav(c));
-  $('#fav').onclick = () => { const on = toggleFav(c); $('#fav').textContent = on ? '★' : '☆'; $('#fav').classList.toggle('on', on); toast(on ? 'お気に入りに追加' : 'お気に入りから外しました'); };
-  $('#copy').onclick = () => navigator.clipboard?.writeText(c).then(() => toast(`「${c}」をコピーしました`), () => toast('コピーできませんでした'));
+  showOverlay(c, c);
 
   const body = $('#detail-body');
-  body.textContent = '';
   const radN = e.r, radC = RAD_CHAR(radN);
 
-  const goSearch = (q) => { closeDetail(); setQuery(q); };
   const readBtn = (label, q, ok) => el('button', { onclick: () => goSearch(q) }, label, ok ? el('span', { class: 'ok' }, ok) : null);
 
   body.append(
@@ -232,6 +313,19 @@ async function openDetail(c, push = true) {
   const strokeCard = el('div', { class: 'card' }, el('h3', {}, '筆順'));
   body.append(strokeCard);
 
+  // この字を使う熟語
+  const wordCard = el('div', { class: 'card' }, el('h3', {}, 'この字を使う熟語'));
+  const wordWait = el('p', { class: 'nodata' }, '読み込み中…');
+  wordCard.append(wordWait);
+  body.append(wordCard);
+  loadWords().then(() => {
+    wordWait.remove();
+    if (!W) { wordCard.append(el('p', { class: 'nodata' }, '熟語データを読み込めませんでした（オフライン？）')); return; }
+    const ws = W.filter((w) => w.forms[0] !== c && w.forms[0].includes(c));
+    if (!ws.length) { wordCard.append(el('p', { class: 'nodata' }, '収録している熟語はありません')); return; }
+    wordCard.append(wordList(ws, 12, () => goSearch(c)));
+  });
+
   // パーツ・部首
   const parts = [...new Set([...(e.p || '')])].filter((p) => p !== c);
   const partCard = el('div', { class: 'card' }, el('h3', {}, '部品から探す'));
@@ -250,8 +344,66 @@ async function openDetail(c, push = true) {
   buildStrokeView(strokeCard, strokes);
 }
 
+// 詳細画面を開いて、上部バー(お気に入り・コピー)を設定
+function showOverlay(favKey, copyText) {
+  $('#detail').hidden = false;
+  $('#detail').scrollTop = 0;
+  document.body.style.overflow = 'hidden';
+  stopAnim();
+  $('#detail-body').textContent = '';
+  const paint = (on) => { $('#fav').textContent = on ? '★' : '☆'; $('#fav').classList.toggle('on', on); };
+  paint(isFav(favKey));
+  $('#fav').onclick = () => { const on = toggleFav(favKey); paint(on); toast(on ? 'お気に入りに追加' : 'お気に入りから外しました'); };
+  $('#copy').onclick = () => navigator.clipboard?.writeText(copyText).then(() => toast(`「${copyText}」をコピーしました`), () => toast('コピーできませんでした'));
+}
+const goSearch = (q) => { closeDetail(); setQuery(q); };
+
+// ===== 熟語の詳細 =====
+async function openWord(i, push = true) {
+  await loadWords();
+  const w = W && W[i];
+  if (!w) return;
+  const word = w.forms[0];
+  addHistory('w:' + word);
+  if (push) history.pushState({ w: i }, '', '#w=' + i);
+  showOverlay('w:' + word, word);
+  const body = $('#detail-body');
+
+  body.append(el('div', { class: 'whero' },
+    el('div', { class: 'wbig' }, word),
+    el('div', { class: 'wread' }, w.reads.join('・')),
+    w.forms.length > 1 ? el('div', { class: 'muted' }, '別の書き方：' + w.forms.slice(1).join('・')) : null,
+    w.fl & 1 ? el('span', { class: 'badge', style: 'margin-top:6px' }, 'よく使う語') : null));
+
+  const defCard = el('div', { class: 'card' }, el('h3', {}, '意味'));
+  body.append(defCard);
+
+  // 使われている漢字
+  const ks = [...new Set([...word].filter((ch) => K[ch]))];
+  if (ks.length) {
+    const g = el('div', { class: 'grid' });
+    ks.forEach((c) => g.append(tile(c)));
+    body.append(el('div', { class: 'card' }, el('h3', {}, '使われている漢字'), g));
+  }
+  body.append(el('p', { class: 'credit' }, '意味: ウィクショナリー日本語版 (CC BY-SA 4.0) / 語・読み: JMdict (EDRDG, CC BY-SA 4.0)'));
+
+  const defs = await loadDefs(i);
+  if (history.state?.w !== i) return; // 別の画面に移動済み
+  const web = el('a', { href: `https://www.google.com/search?q=${encodeURIComponent(word + ' 意味')}`, target: '_blank', rel: 'noopener' }, 'Webで調べる');
+  if (defs === undefined) { defCard.append(el('p', { class: 'nodata' }, '意味データを読み込めませんでした（オフライン？）')); return; }
+  if (!defs) { defCard.append(el('p', { class: 'nodata' }, '日本語の意味データがありません。'), el('p', { class: 'links' }, web)); return; }
+  const ol = el('ol', { class: 'defs' });
+  let lastPos = null;
+  for (const [pos, d] of defs) {
+    ol.append(el('li', {}, pos && pos !== lastPos ? el('span', { class: 'pos' }, pos) : null, d));
+    if (pos) lastPos = pos;
+  }
+  defCard.append(ol, el('p', { class: 'links' },
+    el('a', { href: `https://ja.wiktionary.org/wiki/${encodeURIComponent(word)}`, target: '_blank', rel: 'noopener' }, 'ウィクショナリーで見る'), '　', web));
+}
+
 function closeDetail() {
-  if (history.state?.k) history.back();
+  if (history.state?.k || history.state?.w != null) history.back();
   else hideDetail();
 }
 function hideDetail() {
@@ -395,6 +547,7 @@ async function initPad() {
     pad.addEventListener('pointercancel', end);
     $('#hw-undo').onclick = () => { userStrokes.pop(); redraw(); recognize(); };
     $('#hw-clear').onclick = () => { userStrokes = []; redraw(); recognize(); };
+    $('#hw-bs').onclick = () => setQuery([...$('#q').value].slice(0, -1).join(''));
   }
   if (!HW) {
     $('#hw-cands').innerHTML = '<span class="muted">手書きデータを読み込み中…</span>';
@@ -460,7 +613,7 @@ function strokeDist(a, i, b, j) {
 function recognize() {
   const box = $('#hw-cands');
   if (!HW) return;
-  if (!userStrokes.length) { box.innerHTML = '<span class="muted">枠に漢字を書いてください（書き順どおりだと精度が上がります）</span>'; return; }
+  if (!userStrokes.length) { box.innerHTML = '<span class="muted">枠に1字ずつ書いて候補をタップ → 検索欄に入ります。続けて書けば熟語も探せます</span>'; return; }
   const u = userFeatures(userStrokes), n = userStrokes.length, G = 70;
   const res = [];
   const dp = new Float32Array((n + 1) * 40);
@@ -480,7 +633,8 @@ function recognize() {
   }
   res.sort((a, b) => a[1] - b[1]);
   box.textContent = '';
-  res.slice(0, 15).forEach(([c]) => box.append(el('button', { onclick: () => openDetail(c) }, c)));
+  // 候補をタップ → 検索欄の末尾に追加して、次の字を書けるように枠を消す
+  res.slice(0, 15).forEach(([c]) => box.append(el('button', { onclick: () => { setQuery($('#q').value + c); userStrokes = []; redraw(); recognize(); } }, c)));
 }
 
 // ===== その他 =====
@@ -492,6 +646,7 @@ function toast(msg) {
 
 window.addEventListener('popstate', (ev) => {
   if (ev.state?.k) openDetail(ev.state.k, false);
+  else if (ev.state?.w != null) openWord(ev.state.w, false);
   else hideDetail();
 });
 
@@ -509,6 +664,13 @@ async function main() {
   renderSections(null);
   const m = location.hash.match(/^#k=(.+)$/);
   if (m) { const c = decodeURIComponent(m[1]); history.replaceState({ k: c }, '', location.hash); openDetail(c, false); }
+  const mw = location.hash.match(/^#w=(d+)$/);
+  if (mw) { history.replaceState({ w: +mw[1] }, '', location.hash); openWord(+mw[1], false); }
+  // 熟語データは裏で読み込み、届いたら今の表示を更新
+  loadWords().then(() => {
+    if (view === 'home') renderSections(null);
+    else if ($('#q').value) renderSections(search($('#q').value));
+  });
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 main();

@@ -174,3 +174,25 @@ svg .no { fill: var(--accent); font-size: 8px; font-family: var(--gothic); }
   position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%);
   background: var(--ink); color: var(--bg); padding: 8px 16px; border-radius: 999px; font-size: 14px; z-index: 20;
 }
+
+/* ---- 熟語 ---- */
+.wlist { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.card .wlist { border: 0; border-radius: 0; background: none; margin: 0 -4px; }
+.wrow {
+  display: grid; grid-template-columns: auto 1fr; column-gap: 10px; align-items: baseline;
+  text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line);
+}
+.wrow:last-child { border-bottom: 0; }
+.wrow:active { background: var(--accent-soft); }
+.wrow .wf { font-family: var(--mincho); font-size: 20px; }
+.wrow .wr { font-size: 13px; color: var(--muted); }
+.wrow .ws { grid-column: 1 / -1; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.whero { padding: 4px 0 2px; }
+.wbig { font-family: var(--mincho); font-size: 44px; line-height: 1.2; word-break: break-all; }
+.wread { font-size: 18px; color: var(--muted); margin: 2px 0 4px; }
+.defs { margin: 0; padding-left: 22px; }
+.defs li { margin: 0 0 10px; line-height: 1.65; }
+.defs li::marker { color: var(--muted); }
+.defs .pos { display: inline-block; font-size: 11px; font-weight: 600; color: var(--accent); background: var(--accent-soft); border-radius: 6px; padding: 0 6px; margin-right: 6px; vertical-align: 2px; }
+.links { font-size: 14px; margin: 4px 0 0; }
+.links a { color: var(--accent); }
